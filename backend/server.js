@@ -22,6 +22,7 @@ app.get("/api/status", (req, res) => {
 });
 
 app.use("/api/auth", require("./routes/authRoutes"));
+app.use("/api/ebooks", require("./routes/ebookRoutes"));
 
 // Démarrer le serveur
 app.listen(PORT, () => {
