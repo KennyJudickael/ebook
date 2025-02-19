@@ -21,6 +21,8 @@ app.get("/api/status", (req, res) => {
   res.json({ message: "API is running" });
 });
 
+app.use("/api/auth", require("./routes/authRoutes"));
+
 // Démarrer le serveur
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
