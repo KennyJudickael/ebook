@@ -21,6 +21,10 @@ app.get("/api/status", (req, res) => {
   res.json({ message: "API is running" });
 });
 
+// Servir les fichiers uploads
+app.use("/uploads", express.static("uploads"));
+
+// Monter les routes
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/ebooks", require("./routes/ebookRoutes"));
 
