@@ -42,4 +42,85 @@ router.post("/upload", protect, upload.single("file"), async (req, res) => {
   }
 });
 
+// Récupérer tous les ebooks
+router.get("/", protect, async (req, res) => {
+  try {
+    const ebooks = await Ebook.find({ user: req.user.id });
+    res.json(ebooks);
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Erreur lors de la récupération des ebooks", error });
+  }
+});
+
+// Récupérer un ebook par son ID
+router.get("/:id", protect, async (req, res) => {
+  try {
+    const ebook = await Ebook.findById(req.params.id);
+    if (!ebook) {
+      return res.status(404).json({ message: "Ebook non trouvé" });
+    }
+    res.json(ebook);
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Erreur lors de la récupération de l'ebook", error });
+  }
+});
+
+// Modifier un ebook
+router.put("/:id", protect, async (req, res) => {
+  try {
+    const { title, author } = req.body;
+
+    let ebook = await Ebook.findById(req.params.id);
+    if (!ebook) {
+      return res.status(404).json({ message: "Ebook non trouvé" });
+    }
+
+    // Vérifie si l'utilisateur est bien le propriétaire de l'ebook
+    if (ebook.user.toString() !== req.user.id) {
+      return res
+        .status(403)
+        .json({ message: "Non autorisé à modifier cet ebook" });
+    }
+
+    // Mise à jour des champs
+    ebook.title = title || ebook.title;
+    ebook.author = author || ebook.author;
+
+    await ebook.save();
+    res.json({ message: "Ebook mis à jour avec succès", ebook });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Erreur lors de la mise à jour de l'ebook", error });
+  }
+});
+
+// Supprimer un ebook
+router.delete("/:id", protect, async (req, res) => {
+  try {
+    const ebook = await Ebook.findById(req.params.id);
+    if (!ebook) {
+      return res.status(404).json({ message: "Ebook non trouvé" });
+    }
+
+    // Vérifie si l'utilisateur est bien le propriétaire de l'ebook
+    if (ebook.user.toString() !== req.user.id) {
+      return res
+        .status(403)
+        .json({ message: "Non autorisé à supprimer cet ebook" });
+    }
+
+    await ebook.deleteOne();
+    res.json({ message: "Ebook supprimé avec succès" });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ message: "Erreur lors de la suppression de l'ebook", error });
+  }
+});
+
 module.exports = router;
