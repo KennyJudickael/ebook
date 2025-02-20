@@ -2,21 +2,29 @@ const express = require("express");
 const multer = require("multer");
 const { protect } = require("../middleware/authMiddleware"); // Assure-toi que cette exportation existe
 const Ebook = require("../models/Ebook");
+const cloudinary = require("../config/cloudinary");
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
 
 const router = express.Router();
 
-// Configuration de multer pour l'upload des fichiers
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, "uploads/"); // Dossier où enregistrer les fichiers
-  },
-  filename: function (req, file, cb) {
-    cb(null, Date.now() + "-" + file.originalname);
+// Configuration de Multer avec Cloudinary
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: "ebooks", // Dossier où seront stockés les fichiers
+    format: async (req, file) => "pdf", // Forcer le format PDF
+    public_id: (req, file) => Date.now() + "-" + file.originalname,
   },
 });
+
 const upload = multer({ storage });
 
-// Ajouter un ebook
+const getCloudinaryPublicId = (url) => {
+  const parts = url.split("/");
+  return parts[parts.length - 1].split(".")[0]; // Extrait l'ID sans l'extension
+};
+
+// Route pour ajouter un ebook avec Cloudinary
 router.post("/upload", protect, upload.single("file"), async (req, res) => {
   try {
     const { title, author } = req.body;
@@ -25,10 +33,10 @@ router.post("/upload", protect, upload.single("file"), async (req, res) => {
     }
 
     const newEbook = new Ebook({
-      user: req.user.id, // Assure-toi que req.user est correctement défini par ton middleware
+      user: req.user.id,
       title,
       author,
-      fileUrl: req.file.path, // Chemin du fichier stocké
+      fileUrl: req.file.path, // L'URL Cloudinary sera stockée ici
     });
 
     await newEbook.save();
@@ -70,7 +78,7 @@ router.get("/:id", protect, async (req, res) => {
 });
 
 // Modifier un ebook
-router.put("/:id", protect, async (req, res) => {
+router.put("/:id", protect, upload.single("file"), async (req, res) => {
   try {
     const { title, author } = req.body;
 
@@ -79,16 +87,24 @@ router.put("/:id", protect, async (req, res) => {
       return res.status(404).json({ message: "Ebook non trouvé" });
     }
 
-    // Vérifie si l'utilisateur est bien le propriétaire de l'ebook
     if (ebook.user.toString() !== req.user.id) {
       return res
         .status(403)
         .json({ message: "Non autorisé à modifier cet ebook" });
     }
 
+    // Si un nouveau fichier est uploadé, supprimer l'ancien fichier de Cloudinary
+    let newFileUrl = ebook.fileUrl;
+    if (req.file) {
+      const publicId = getCloudinaryPublicId(ebook.fileUrl);
+      await cloudinary.uploader.destroy(`ebooks/${publicId}`);
+      newFileUrl = req.file.path; // Nouvelle URL du fichier Cloudinary
+    }
+
     // Mise à jour des champs
     ebook.title = title || ebook.title;
     ebook.author = author || ebook.author;
+    ebook.fileUrl = newFileUrl;
 
     await ebook.save();
     res.json({ message: "Ebook mis à jour avec succès", ebook });
@@ -107,14 +123,20 @@ router.delete("/:id", protect, async (req, res) => {
       return res.status(404).json({ message: "Ebook non trouvé" });
     }
 
-    // Vérifie si l'utilisateur est bien le propriétaire de l'ebook
+    // Vérifie si l'utilisateur est bien le propriétaire
     if (ebook.user.toString() !== req.user.id) {
       return res
         .status(403)
         .json({ message: "Non autorisé à supprimer cet ebook" });
     }
 
+    // Supprimer le fichier sur Cloudinary
+    const publicId = getCloudinaryPublicId(ebook.fileUrl);
+    await cloudinary.uploader.destroy(`ebooks/${publicId}`);
+
+    // Supprimer l'ebook de la base de données
     await ebook.deleteOne();
+
     res.json({ message: "Ebook supprimé avec succès" });
   } catch (error) {
     res
