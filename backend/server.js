@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 import express from "express";
 import mongoose from "mongoose";
 import authRoutes from "./routes/authRoutes.js";
+import ebookRoutes from "./routes/ebookRoutes.js";
 
 dotenv.config();
 
@@ -24,6 +25,7 @@ try {
 
 // Routes
 app.use("/api/auth", authRoutes);
+app.use("/api/ebooks", ebookRoutes);
 
 // Route de test
 app.get("/", (req, res) => res.send("Serveur en marche !"));
