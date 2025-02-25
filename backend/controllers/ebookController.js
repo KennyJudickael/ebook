@@ -67,3 +67,24 @@ export const uploadEbook = [
     }
   },
 ];
+
+export const getEbooks = async (req, res) => {
+  try {
+    const ebooks = await Ebook.find({ user: req.user.id });
+    console.log("Ebooks récupérés :", ebooks);
+    res.json({
+      message: "Liste des ebooks récupérée avec succès",
+      ebooks: ebooks.map((ebook) => ({
+        id: ebook._id,
+        title: ebook.title,
+        author: ebook.author,
+        fileUrl: ebook.fileUrl,
+        fileType: ebook.fileType,
+        createdAt: ebook.createdAt,
+      })),
+    });
+  } catch (error) {
+    console.error("Erreur lors de la récupération des ebooks :", error.stack);
+    res.status(500).json({ message: "Erreur serveur", error: error.message });
+  }
+};
