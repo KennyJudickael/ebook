@@ -1,21 +1,10 @@
 import multer from "multer";
-import { CloudinaryStorage } from "multer-storage-cloudinary";
+import streamifier from "streamifier";
 import cloudinary from "../config/cloudinary.js";
 import Ebook from "../models/Ebook.js";
 
-// Configurer le stockage Cloudinary pour Multer
-const storage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: "ebooks",
-    allowed_formats: ["pdf", "epub"],
-    resource_type: "raw", // Important pour EPUB (fichiers non-image)
-  },
-});
+const upload = multer({ storage: multer.memoryStorage() });
 
-const upload = multer({ storage });
-
-// Contrôleur pour uploader un ebook
 export const uploadEbook = [
   upload.single("file"),
   async (req, res) => {
@@ -24,45 +13,57 @@ export const uploadEbook = [
       console.log("Fichier reçu :", req.file);
       console.log("Données du corps :", req.body);
 
-      const { title, author } = req.body;
-
       if (!req.file) {
         console.log("Aucun fichier détecté");
-        return res.status(400).json({ message: "Aucun fichier envoyé" });
+        return res.status(400).json({ message: "Aucun fichier téléchargé" });
       }
 
-      console.log("Type MIME du fichier :", req.file.mimetype);
-      const fileType =
-        req.file.mimetype === "application/epub+zip" ? "epub" : "pdf";
-      console.log("Type de fichier attribué :", fileType);
+      const stream = streamifier.createReadStream(req.file.buffer);
+      const options = {
+        folder: "ebooks",
+        resource_type: "raw",
+      };
 
-      const ebook = new Ebook({
-        user: req.user.id,
-        title,
-        author,
-        fileUrl: req.file.path,
-        fileType,
-      });
-      console.log("Ebook avant sauvegarde :", ebook);
-      await ebook.save();
-      console.log("Ebook sauvegardé avec succès");
+      const uploadStream = cloudinary.uploader.upload_stream(
+        options,
+        async (error, result) => {
+          if (error) {
+            console.error("Erreur d'upload sur Cloudinary :", error);
+            return res
+              .status(500)
+              .json({ message: "Erreur lors de l'upload sur Cloudinary" });
+          }
 
-      res.status(201).json({
-        message: "Ebook uploadé avec succès",
-        ebook: {
-          id: ebook._id,
-          title: ebook.title,
-          author: ebook.author,
-          fileUrl: ebook.fileUrl,
-          fileType: ebook.fileType,
-        },
-      });
-    } catch (err) {
-      console.error("Erreur détaillée lors de l’upload :", err.stack); // Log complet
-      res.status(500).json({
-        message: "Erreur serveur lors de l’upload",
-        error: err.message,
-      });
+          const { title, author } = req.body;
+          const fileType =
+            req.file.mimetype === "application/epub+zip" ? "epub" : "pdf";
+          const ebook = new Ebook({
+            user: req.user.id,
+            title,
+            author,
+            fileUrl: result.secure_url,
+            fileType,
+          });
+
+          await ebook.save();
+          console.log("Ebook sauvegardé :", ebook); // Log une seule fois après sauvegarde
+          res.status(201).json({
+            message: "Fichier téléchargé avec succès",
+            ebook: {
+              id: ebook._id,
+              title: ebook.title,
+              author: ebook.author,
+              fileUrl: ebook.fileUrl,
+              fileType: ebook.fileType,
+            },
+          });
+        }
+      );
+
+      stream.pipe(uploadStream);
+    } catch (error) {
+      console.error("Erreur lors de l’upload :", error.stack);
+      res.status(500).json({ message: "Erreur serveur", error: error.message });
     }
   },
 ];
