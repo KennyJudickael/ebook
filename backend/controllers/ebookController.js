@@ -1,15 +1,19 @@
+import fs from "fs/promises";
 import { createRequire } from "module";
 import multer from "multer";
-import fetch from "node-fetch";
-import streamifier from "streamifier";
-import cloudinary from "../config/cloudinary.js";
+import pdfParse from "pdf-parse";
 import Ebook from "../models/Ebook.js";
 const require = createRequire(import.meta.url);
-const pdfParse = require("pdf-parse");
 const parseEpubModule = require("@gxl/epub-parser");
 const parseEpub = parseEpubModule.default || parseEpubModule;
 
-const upload = multer({ storage: multer.memoryStorage() });
+// Configurer Multer pour le stockage local
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, "uploads/"),
+  filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
+});
+
+const upload = multer({ storage });
 
 export const uploadEbook = [
   upload.single("file"),
@@ -24,76 +28,37 @@ export const uploadEbook = [
         return res.status(400).json({ message: "Aucun fichier téléchargé" });
       }
 
-      const stream = streamifier.createReadStream(req.file.buffer);
-      const options = {
-        folder: "ebooks",
-        resource_type: "raw",
-      };
+      const { title, author } = req.body;
+      const fileType =
+        req.file.mimetype === "application/epub+zip" ? "epub" : "pdf";
 
-      const uploadStream = cloudinary.uploader.upload_stream(
-        options,
-        async (error, result) => {
-          if (error) {
-            console.error("Erreur d'upload sur Cloudinary :", error);
-            return res
-              .status(500)
-              .json({ message: "Erreur lors de l'upload sur Cloudinary" });
-          }
+      const ebook = new Ebook({
+        user: req.user.id,
+        title,
+        author,
+        fileUrl: req.file.path,
+        fileType,
+      });
 
-          const { title, author } = req.body;
-          const fileType =
-            req.file.mimetype === "application/epub+zip" ? "epub" : "pdf";
-          const ebook = new Ebook({
-            user: req.user.id,
-            title,
-            author,
-            fileUrl: result.secure_url,
-            fileType,
-          });
+      await ebook.save();
+      console.log("Ebook sauvegardé :", ebook);
 
-          await ebook.save();
-          console.log("Ebook sauvegardé :", ebook); // Log une seule fois après sauvegarde
-          res.status(201).json({
-            message: "Fichier téléchargé avec succès",
-            ebook: {
-              id: ebook._id,
-              title: ebook.title,
-              author: ebook.author,
-              fileUrl: ebook.fileUrl,
-              fileType: ebook.fileType,
-            },
-          });
-        }
-      );
-
-      stream.pipe(uploadStream);
+      res.status(201).json({
+        message: "Fichier téléchargé avec succès",
+        ebook: {
+          id: ebook._id,
+          title: ebook.title,
+          author: ebook.author,
+          fileUrl: ebook.fileUrl,
+          fileType: ebook.fileType,
+        },
+      });
     } catch (error) {
       console.error("Erreur lors de l’upload :", error.stack);
       res.status(500).json({ message: "Erreur serveur", error: error.message });
     }
   },
 ];
-
-export const getEbooks = async (req, res) => {
-  try {
-    const ebooks = await Ebook.find({ user: req.user.id });
-    console.log("Ebooks récupérés :", ebooks);
-    res.json({
-      message: "Liste des ebooks récupérée avec succès",
-      ebooks: ebooks.map((ebook) => ({
-        id: ebook._id,
-        title: ebook.title,
-        author: ebook.author,
-        fileUrl: ebook.fileUrl,
-        fileType: ebook.fileType,
-        createdAt: ebook.createdAt,
-      })),
-    });
-  } catch (error) {
-    console.error("Erreur lors de la récupération des ebooks :", error.stack);
-    res.status(500).json({ message: "Erreur serveur", error: error.message });
-  }
-};
 
 export const getEbookContent = async (req, res) => {
   try {
@@ -104,38 +69,28 @@ export const getEbookContent = async (req, res) => {
       return res.status(404).json({ message: "Ebook non trouvé" });
     }
 
-    // Télécharger le fichier depuis Cloudinary
-    const response = await fetch(ebook.fileUrl);
-    if (!response.ok) {
-      throw new Error("Erreur lors du téléchargement du fichier");
-    }
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    let pages = [];
+    const buffer = await fs.readFile(ebook.fileUrl);
+    let content;
 
     if (ebook.fileType === "pdf") {
       const data = await pdfParse(buffer);
-      const text = data.text;
-      const pageSize = 1000;
-      for (let i = 0; i < text.length; i += pageSize) {
-        pages.push(text.slice(i, i + pageSize));
-      }
+      content = data.text; // Texte brut complet
     } else if (ebook.fileType === "epub") {
       const epubData = await parseEpub(buffer);
-      pages = epubData.sections.map((section) => section.textContent || "");
+      content = epubData.sections.map((section) => ({
+        id: section.id,
+        text: section.textContent || "",
+      })); // Sections structurées
     } else {
       return res.status(400).json({ message: "Type de fichier non supporté" });
     }
 
-    console.log(
-      `Contenu extrait pour ${ebook.fileType}, ${pages.length} pages`
-    );
+    console.log(`Contenu extrait pour ${ebook.fileType}`);
     res.json({
       message: "Contenu extrait avec succès",
       ebookId: ebook._id,
       fileType: ebook.fileType,
-      pages,
+      content,
     });
   } catch (error) {
     console.error("Erreur lors de l’extraction du contenu :", error.stack);
